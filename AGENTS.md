@@ -318,6 +318,31 @@ See `docs/TRITON_ACCELERATION_WORKFLOW.md` for details.
 
 ## 9. Parallelism and Checkpointing
 
+### Fine-grained Selective Checkpointing
+
+The framework supports fine-grained activation recomputation with per-layer, submodule-level toggles:
+
+```python
+# In DecoderLLMConfig
+recompute: list[str] | bool = []
+# Options: "attention", "attn_norm", "feed_forward", "ffn_norm"
+# Set True to enable all, False/[] to disable all
+
+# In AttentionConfig
+recompute_qknorm_rope: bool  # Recompute QK-Norm and RoPE
+
+# In FeedForwardConfig  
+swiglu_recompute_silu_out_proj: bool  # Fuse SiLU with output projection
+```
+
+Key implementation files:
+- `steptronoss/core/tensor_parallel/random.py`: Core `CheckpointFunction`
+- `steptronoss/model/decoder_model.py`: `TransformerBlock` conditional checkpointing
+- `steptronoss/model/common/feed_forward.py`: SiLU fusion optimization
+- `steptronoss/model/common/moe_block.py`: MoE-aware checkpointing (router excluded)
+
+See `docs/FINE_GRAINED_SELECTIVE_CHECKPOINTING.md` for detailed design.
+
 ### Parallel State (PM)
 
 The global `PM` (ParallelManager) manages all parallel groups:

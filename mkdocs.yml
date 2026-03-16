@@ -9,6 +9,7 @@ copyright: Maintained by <a href="https://Randomizez.com">Randomizez</a>.
 
 nav:
   - Home: index.md
+  - Fine-grained Selective Checkpointing: FINE_GRAINED_SELECTIVE_CHECKPOINTING.md
   - SFT Data Preparation: SFT_DATA_PREPARATION.md
   - SFT Data Preparation (EN): SFT_DATA_PREPARATION_EN.md
   - Modules: MODULES.md

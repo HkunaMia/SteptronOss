@@ -54,6 +54,7 @@ cfshow playground/rlvr/qwen3_1p5b_rlvr_math.py
 - API modules: [MODULES](MODULES.md)
 - Triton 加速开发流程 (ZH): [TRITON_ACCELERATION_WORKFLOW_ZH](TRITON_ACCELERATION_WORKFLOW_ZH.md)
 - Triton acceleration workflow (EN): [TRITON_ACCELERATION_WORKFLOW](TRITON_ACCELERATION_WORKFLOW.md)
+- GPU Kernel 融合优化: [GPU_KERNEL_FUSION_OPTIMIZATIONS](GPU_KERNEL_FUSION_OPTIMIZATIONS.md)
 
 ## Optimization Kernels
 Install optional kernels when needed:
