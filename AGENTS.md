@@ -1,30 +1,466 @@
 ## StepTronOSS AGENTS
 
-This file stores repo-specific priors for future agents. Keep it short, practical,
-and biased toward things that save repeated exploration.
+This file stores repo-specific priors for AI coding agents. It contains essential information about project structure, development conventions, and workflows.
 
-## 1. Working Rules
+## 1. Project Overview
 
-### Self-Improvement Loop
+**StepTronOSS** is a lightweight training framework for large-scale language models, focusing on:
+- Modular, config-driven experiments with dynamic validation
+- Reproducible training workflows (SFT, RLVR, Pretrain)
+- Multi-task orchestration with flexible launch tooling
+- Extensible data/optimizer/model stacks for rapid research iteration
 
-Do an improve pass for key tasks:
+The framework can run with only PyTorch as a dependency, while also supporting operator-level optimizations (flash-attn, Triton kernels, grouped_gemm).
 
-- new environment
-- new task type
-- new project area
-- high risk / high cost work
-- collaboration / handoff work
+## 2. Technology Stack
 
-Improve pass:
+- **Language**: Python 3.10+
+- **Package Manager**: uv (modern Python package manager)
+- **Build System**: hatchling
+- **Deep Learning**: PyTorch 2.9.0, transformers, triton 3.5.0
+- **Distributed Training**: Custom parallel state management with TP/PP/DP/CP/EP support
+- **Serving**: vLLM for inference deployment
+- **Data**: Custom dataloader with packing and compilation support
+- **Logging**: loguru, tensorboard, wandb
+- **Communication**: Redis for distributed rendezvous
 
+### Key Dependencies
+```toml
+torch==2.9.0
+triton==3.5.0
+transformers<5.0
+vllm>=0.11
+safetensors
+redis
+megfile
+```
+
+## 3. Code Organization
+
+```
+steptronoss/                    # Core package
+├── core/                       # Parallelism and training infrastructure
+│   ├── parallel_state.py       # Global PM (ParallelManager) for TP/PP/DP/CP/EP
+│   ├── trainers/               # Trainer implementations
+│   ├── pipeline_parallel/      # PP/VPP schedulers
+│   ├── tensor_parallel/        # TP utilities
+│   └── context_parallel/       # CP implementations
+├── model/                      # Model architectures and implementations
+│   ├── qwen_dense.py           # Qwen dense model
+│   ├── step3p5.py              # Step3.5 model
+│   ├── decoder_model.py        # Base decoder
+│   ├── common/                 # Shared components (attention, MoE, embedding)
+│   ├── ep_dispatcher/          # Expert parallel dispatchers (DeepEP)
+│   ├── optimizations/          # Triton-optimized kernels
+│   └── utils/                  # Model utilities
+├── exp/                        # Experiment configurations
+│   ├── base_exp.py             # Core configs (BaseExp, TrainerConfig, etc.)
+│   ├── ntp.py                  # Next Token Prediction (PretrainExp)
+│   ├── sft.py                  # SFT experiments
+│   ├── rl.py                   # RLVR/PPO experiments
+│   ├── optimizer.py            # Optimizer configs (Adam, Muon)
+│   ├── lr_schedulers.py        # Learning rate schedulers
+│   ├── checkpointing.py        # Checkpoint configs
+│   ├── inference.py            # Inference configs (VLLMDeployConfig)
+│   └── resources.py            # Resource/TaskSpec configs
+├── data/                       # Data loading and processing
+│   ├── recipe.py               # DataRecipe for compilation
+│   ├── dataloader/
+│   ├── datasets/
+│   └── packing/                # Sequence packing
+├── optimizer/                  # Gradient managers and optimizers
+│   ├── gradient_manager.py
+│   ├── zero1_gradient_manager.py
+│   └── muon.py                 # Muon optimizer
+├── checkpointing/              # Checkpoint save/load and reshape
+│   ├── local_checkpoint.py
+│   ├── reshape_ops.py          # Ops for checkpoint reshaping
+│   └── hf_checkpoint.py
+├── generation/                 # Generation infrastructure
+│   ├── async_generation.py
+│   └── vllm/                   # vLLM router/controller
+├── tokenizer/                  # Tokenizer implementations
+├── text_processing/            # Text processing utilities
+└── utils/                      # Utilities
+    ├── arguments.py            # CLI argument parsing
+    ├── comm_utils.py           # Redis rendezvous, queues
+    ├── dist_utils.py           # Distributed utilities
+    ├── metrics.py              # Metrics system
+    ├── optimizable.py          # @optimizable decorator
+    ├── logger.py               # Rank-aware logging
+    └── memory_tracker.py       # Memory tracking (CMT)
+
+playground/                     # Experiment configurations
+├── pretrain/                   # Pretraining experiments
+│   └── qwen3/
+├── sft/                        # SFT experiments
+│   ├── qwen3/
+│   └── step3/
+├── rlvr/                       # RLVR experiments
+└── tools/                      # Data compilation tools
+
+tests/                          # Test suite
+├── conftest.py                 # pytest configuration (node2 skip logic)
+├── test_*.py                   # Unit/integration tests
+└── fixtures/
+
+tools/                          # Runtime tools
+├── mp_run.py                   # Multi-process task runner
+├── build_scripts.py            # Generate per-replica launch scripts
+├── smartrun                    # Smart runner wrapper
+└── example_submitter.py        # Template for custom submitters
+
+benchmarks/                     # Performance benchmarks
+├── benchmark_*.py              # Component benchmarks
+└── run_all.sh
+
+docs/                           # Documentation
+├── LAUNCH_EXPERIMENTS.md       # Launch guide
+├── SFT_DATA_PREPARATION.md     # Data preparation
+├── TRITON_ACCELERATION_WORKFLOW.md  # Triton workflow
+└── MODULES.md                  # API documentation
+```
+
+## 4. Build and Setup Commands
+
+### Initial Setup
+```bash
+# Install dependencies and pre-commit hooks
+uv sync
+apt install -y redis-server
+uv run pre-commit install
+```
+
+### Optional Optimizations
+```bash
+# Flash Attention
+uv pip install flash-attn --no-build-isolation
+
+# Grouped GEMM (requires CUDA 12.9)
+# Ensure CUTLASS headers are linked properly first
+CUDA_HOME=/data/cuda/cuda-12.9/cuda \
+CUDACXX=/data/cuda/cuda-12.9/cuda/bin/nvcc \
+pip install -e third_party/grouped_gemm --no-build-isolation
+
+# DeepEP (if using expert parallelism)
+CUDA_HOME=/data/cuda/cuda-12.9/cuda \
+CUDACXX=$CUDA_HOME/bin/nvcc \
+pip install -e /data/DeepEP --no-build-isolation
+```
+
+### Code Quality
+```bash
+make check          # Run pre-commit hooks (ruff, formatters)
+make test           # Run pytest with coverage
+make docs           # Build and serve documentation
+make docs-test      # Test documentation build
+```
+
+### Environment Variables
+```bash
+# Required for multi-node runs
+export STEPTRON_MEET_DIR=/path/to/shared    # Redis rendezvous directory
+
+# Optional
+export CANNOT_BE_REDIS_SERVER=1             # Prevent this rank from starting Redis
+export MEM_DIAGNOSE=1                       # Enable memory tracking (CMT)
+```
+
+## 5. Experiment Development
+
+### Config System (configurize)
+
+All experiments use the `configurize` library for declarative configs:
+
+```python
+from configurize import Config, Ref
+
+class MyExpConfig(Config):
+    """Config class with type annotations and docstrings."""
+    param_a: int                    # Required field
+    param_b: float = 1.0           # Default value
+    nested_cfg: SubConfig = SubConfig  # Sub-config
+    
+    # Reference to parent/other config values
+    derived_value: int = Ref("..parent_value")
+    
+    def build(self):
+        """Build the runtime object."""
+        return MyExp(cfg=self)
+    
+    def sanity_check(self):
+        """Validate config values."""
+        super().sanity_check()
+        assert self.param_b > 0
+```
+
+### Experiment Structure
+
+```python
+class MyExp(BaseExp):
+    """Experiment docstring describing purpose."""
+    # Config declarations (class level)
+    trainer_cfg: NTPTrainerConfig = NTPTrainerConfig
+    model_cfg: MyModelConfig = MyModelConfig
+    data_cfg: MyDataConfig = MyDataConfig
+    
+    def __init__(self):
+        super().__init__()
+        # Instance-level config customization
+        self.trainer_cfg.global_batch_size = 32
+        self.model_cfg.hidden_size = 4096
+
+if __name__ == "__main__":
+    Exp().train()
+```
+
+### Running Experiments
+
+```bash
+# Single-task single-node
+uv run torchrun playground/sft/your_exp.py
+
+# Multi-task (e.g., RL with generator + trainer + router)
+export STEPTRON_MEET_DIR=/path/to/shared
+uv run tools/mp_run.py playground/rlvr/qwen3_1p5b_rlvr_math.py
+
+# Config inspection and validation
+uv run cfshow playground/rlvr/qwen3_1p5b_rlvr_math.py
+uv run cfshow playground/rlvr/qwen3_1p5b_rlvr_math.py -k actor_model_cfg
+
+# Override config from CLI
+uv run tools/mp_run.py your_exp.py trainer_cfg.lr=1e-4
+
+# Generate launch scripts for multi-node
+uv run tools/build_scripts.py your_exp.py /mnt/entrypoints/
+```
+
+### Pre-made Experiment Classes
+
+- `PretrainExp` (in `exp/ntp.py`): Next Token Prediction pretraining
+- `SFTExp` (in `exp/sft.py`): Supervised Fine-Tuning
+- `PPOLikeExp` (in `exp/rl.py`): RLVR with PPO
+
+## 6. Code Style Guidelines
+
+### Python Style
+- **Line length**: 120 characters
+- **Formatter**: ruff (with black-compatible settings)
+- **Import sorting**: isort (profile=black)
+- **Type checking**: mypy (configured in pyproject.toml)
+
+### Config Style
+- Include triple-quoted docstrings after field definitions
+- Use `Ref("..path")` for cross-node linkage (reference exact parameter needed)
+- Implement `build()` and `sanity_check()` methods
+- Use `writable_property` for computed properties
+
+### Naming Conventions
+- Config classes: `*Config` suffix (e.g., `ModelConfig`)
+- Experiment classes: `Exp` suffix or descriptive names
+- Private/internal: leading underscore
+
+### Documentation
+- Docstrings for all public classes and methods
+- Type annotations required
+- Comments explain "why", not "what"
+
+## 7. Testing Instructions
+
+### Test Markers
+```python
+@pytest.mark.cpu           # CPU-only tests
+@pytest.mark.gpu           # GPU-only tests  
+@pytest.mark.node2         # Requires torchrun --nproc-per-node=2
+```
+
+### Running Tests
+```bash
+# All tests
+uv run python -m pytest tests/
+
+# Specific markers
+uv run python -m pytest tests/ -m cpu
+uv run python -m pytest tests/ -m gpu
+
+# Multi-process tests (requires torchrun)
+torchrun --nproc-per-node=2 -m pytest -m node2 tests/test_muon_optimizer_node2.py
+
+# With coverage
+uv run python -m pytest tests/ --cov --cov-config=pyproject.toml
+```
+
+### Test Organization
+- `tests/test_*.py`: Unit/integration tests
+- `tests/conftest.py`: Shared pytest fixtures and node2 skip logic
+- `tests/fixtures/`: Test fixtures and mock data
+
+### GPU Test Notes
+- GPU tests should check for GPU availability
+- `node2` tests require proper distributed environment
+- Tests with `@pytest.mark.node2` should also use `pytest.mark.xdist_group("torchrun")`
+
+## 8. Triton Optimization Workflow
+
+When adding Triton kernels, follow this workflow:
+
+1. **Trace First**: Capture forward/backward traces on real experiments
+2. **Choose Boundary**: Single-op replacement → Small fusion → Semantic fused path
+3. **Location**: 
+   - Semantic API: `steptronoss/model/utils/*`
+   - Triton impl: `steptronoss/model/optimizations/<component>/triton.py`
+4. **Register**: Use `@optimizable(alternatives={"triton": triton_impl})`
+5. **Test**: Add CPU reference and GPU forward/backward tests
+6. **Benchmark**: Add benchmark in `benchmarks/benchmark_*.py`
+7. **Validate**: Run real experiment (4-5 iterations), inspect traces
+
+See `docs/TRITON_ACCELERATION_WORKFLOW.md` for details.
+
+## 9. Parallelism and Checkpointing
+
+### Parallel State (PM)
+
+The global `PM` (ParallelManager) manages all parallel groups:
+
+```python
+from steptronoss.core.parallel_state import PM
+
+PM.initialize()
+PM.set_mesh(parallel_cfg)
+# or: with PM.use_mesh(parallel_cfg): ...
+
+# Common helpers
+PM.size_of("TP")           # Get TP size
+PM.rank_in("DP")           # Get rank in DP group
+PM.group_of("PP")          # Get process group
+PM.ranks_of("EP")          # Get all ranks in EP group
+PM.i_am("PP", 0)           # Check if rank 0 in PP
+```
+
+### Parallel Dimensions
+- **TP**: Tensor Parallel
+- **PP**: Pipeline Parallel
+- **DP**: Data Parallel
+- **CP**: Context Parallel
+- **EP**: Expert Parallel (MoE)
+- **ETP**: Expert Tensor Parallel
+- **VPP**: Virtual Pipeline Parallel
+
+### Sizing Constraints
+- `WORLD_SIZE` must be divisible by attention MP size = `PP * TP * CP`
+- `WORLD_SIZE` must be divisible by MoE MP size = `PP * ETP * EP`
+- For TP=8 and EP=8 on 8 GPUs, set `expert_tensor_parallel_size=1`
+
+### Checkpoint Reshape
+
+`steptronoss/checkpointing/reshape_ops.py` provides reshape primitives:
+- `VocabPad`, `ColumnParallel`/`RowParallel`
+- `KeepThisTP`/`KeepThisEP`
+- `GQAMergeQKV`, `FFNMergeGateUp`
+- `UnbindMoE`, `Rename`, `Inverse`
+
+## 10. Data System
+
+### SFT Data Format
+
+JSON array format (StepChatJsonDataset):
+```json
+{
+  "conversations": [
+    {"role": "user", "content": "..."},
+    {"role": "assistant", "content": "...", "loss_mask": 1}
+  ],
+  "images": null
+}
+```
+
+### DataRecipe Workflow
+
+1. Create `CompliableDatasetsConfig` with domains and sources
+2. Compile with `playground/tools/compile_recipe.py` for faster loading
+3. Use `CompiledDatasetsConfig` in experiment
+4. Configure `SFTDataConfig` for training
+
+See `docs/SFT_DATA_PREPARATION_EN.md` for details.
+
+## 11. Common Patterns and Pitfalls
+
+### Config Patterns
+```python
+# Good: Reference specific parameter
+use_qk_norm: bool = Ref("..model_cfg.use_qk_norm")
+
+# Bad: Reference whole config object
+model_cfg: ModelConfig = Ref("..model_cfg")
+
+# Good: Writable computed property
+@writable_property
+def pp_comm_shape(self) -> tuple:
+    return (self.seq_length, self.micro_batch_size, self.hidden_size)
+```
+
+### Model Development
+- Tie embeddings carefully; use `mtp_initialize()` for MTP sync
+- Expert params are reduced over EDP, not dense DP
+- Check gradient manager path for TP/EP scaling before suspecting extra EP factor
+
+### Debugging
+- `debug(56)` in `steptronoss/core/trainers/lm_trainer.py` hangs for rank 56
+- TorchDynamo graph breaks: avoid `Tensor.item()` in optimizable helpers
+- Use tensor-safe checks: `masked amax + torch._assert`
+
+### Memory Tracking
+```python
+from steptronoss.utils.memory_tracker import CMT
+
+# Only records when MEM_DIAGNOSE=1
+with CMT.record("my_operation"):
+    # code
+```
+
+## 12. CI/CD
+
+GitHub Actions workflows:
+- **quality**: pre-commit hooks (ruff, formatters)
+- **tests-and-type-check**: pytest across Python 3.9-3.13, mypy
+- **check-docs**: mkdocs build verification
+
+## 13. Useful Commands Reference
+
+```bash
+# Config inspection
+uv run cfshow <exp.py>                    # Show full config tree
+uv run cfshow <exp.py> -k <key>           # Show specific subtree
+
+# Development
+uv run mypy <file.py>                     # Type check
+uv run pre-commit run -a                  # Run all hooks
+
+# Multi-node script generation
+uv run tools/build_scripts.py <exp.py> <out_dir>
+
+# Redis server for distributed
+redis-server --port <PORT>
+```
+
+## 14. Self-Improvement Loop
+
+Do an improve pass for:
+- New environment or task type
+- New project area exploration
+- High risk / high cost work
+- Collaboration / handoff work
+
+Improve pass process:
 1. Identify friction
 2. Extract reusable priors
 3. Write them down in:
    - `AGENTS.md` for repo-wide priors
-   - `docs/` for process / runbook details
+   - `docs/` for process/runbook details
 
-## 2. Repo Layout
+---
 
+<<<<<<< HEAD
 - Core package: `steptronoss/`
   - core, model, data, exp, optimizer, generation, tokenizer, utils, checkpointing
 - Experiments: `playground/`
@@ -269,3 +705,6 @@ Improve pass:
 - If training hangs on `Waiting for debugger... ip: ... rank: 56`, check for a stray `debug(56)` in `steptronoss/core/trainers/lm_trainer.py`
 - TorchDynamo graph breaks are often triggered by `Tensor.item()` in optimizable helpers; prefer tensor-safe checks like masked `amax` + `torch._assert`
 - `steptronoss/model/common/rope.py` should keep RoPE cos/sin caches and cache-generation math in `torch.float32`; module-wide `.to()/cuda()/bfloat16()` may move the cache device, but must not downcast the cache dtype.
+=======
+*Last updated: 2026-03-13*
+>>>>>>> cb4d747 (kimi init)
